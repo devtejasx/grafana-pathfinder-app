@@ -24,7 +24,7 @@ export interface BoundedRecordStorage {
    */
   set(key: string, percentage: number): Promise<void>;
   clear(key: string): Promise<void>;
-  /** Deletes every key in one read-modify-write. Concurrent `clear` calls share one record, so each write restores the keys its siblings deleted. */
+  /** Deletes every key in one read-modify-write, rather than one write per key. */
   clearMany(keys: string[]): Promise<void>;
   getAll(): Promise<Record<string, number>>;
   /**
@@ -56,6 +56,18 @@ export interface BoundedRecordStorageConfig {
 export function createBoundedRecordStorage(config: BoundedRecordStorageConfig): BoundedRecordStorage {
   const { storageKey, limit, label, createStorage, onQuotaExceeded } = config;
 
+  // Every write below is a read-modify-write of the one record under
+  // `storageKey`. Callers fire writes without awaiting them, so two in flight
+  // at once would both read the same snapshot and the later write would drop
+  // the earlier one's key. Run them one at a time, in call order, per store.
+  let pendingWrite: Promise<void> = Promise.resolve();
+  const serializeWrite = (write: () => Promise<void>): Promise<void> => {
+    const result = pendingWrite.then(write);
+    // A failed write must not stall the ones queued behind it.
+    pendingWrite = result.catch(() => undefined);
+    return result;
+  };
+
   const trimToLimit = (data: Record<string, number>): Record<string, number> => {
     const entries = Object.entries(data);
     const surplus = entries.length - limit;
@@ -83,6 +95,19 @@ export function createBoundedRecordStorage(config: BoundedRecordStorageConfig): 
     await storage.setItem(storageKey, trimToLimit(data));
   };
 
+  // Unqueued, so that `setInternal` can call it while it holds the queue.
+  const cleanupInternal = async (): Promise<void> => {
+    try {
+      const storage = createStorage();
+      const data = (await storage.getItem<Record<string, number>>(storageKey)) || {};
+      if (Object.keys(data).length > limit) {
+        await writeWithCap(data);
+      }
+    } catch (error) {
+      logger.warn(`Failed to cleanup ${label} entries`, { error });
+    }
+  };
+
   const setInternal = async (key: string, percentage: number, hasRetried: boolean): Promise<void> => {
     try {
       const storage = createStorage();
@@ -102,7 +127,7 @@ export function createBoundedRecordStorage(config: BoundedRecordStorageConfig): 
         }
         logger.warn(`Storage quota exceeded, clearing old ${label} data`);
         onQuotaExceeded();
-        await api.cleanup();
+        await cleanupInternal();
         await setInternal(key, percentage, true);
       } else {
         logger.warn(`Failed to save ${label} percentage`, { error });
@@ -134,32 +159,36 @@ export function createBoundedRecordStorage(config: BoundedRecordStorageConfig): 
       }
     },
 
-    async set(key: string, percentage: number): Promise<void> {
-      await setInternal(key, percentage, false);
+    set(key: string, percentage: number): Promise<void> {
+      return serializeWrite(() => setInternal(key, percentage, false));
     },
 
-    async clear(key: string): Promise<void> {
-      try {
-        const storage = createStorage();
-        const data = (await storage.getItem<Record<string, number>>(storageKey)) || {};
-        delete data[key];
-        await storage.setItem(storageKey, data);
-      } catch (error) {
-        logger.warn(`Failed to clear ${label}`, { error });
-      }
-    },
-
-    async clearMany(keys: string[]): Promise<void> {
-      try {
-        const storage = createStorage();
-        const data = (await storage.getItem<Record<string, number>>(storageKey)) || {};
-        for (const key of keys) {
+    clear(key: string): Promise<void> {
+      return serializeWrite(async () => {
+        try {
+          const storage = createStorage();
+          const data = (await storage.getItem<Record<string, number>>(storageKey)) || {};
           delete data[key];
+          await storage.setItem(storageKey, data);
+        } catch (error) {
+          logger.warn(`Failed to clear ${label}`, { error });
         }
-        await storage.setItem(storageKey, data);
-      } catch (error) {
-        logger.warn(`Failed to clear ${label}`, { error });
-      }
+      });
+    },
+
+    clearMany(keys: string[]): Promise<void> {
+      return serializeWrite(async () => {
+        try {
+          const storage = createStorage();
+          const data = (await storage.getItem<Record<string, number>>(storageKey)) || {};
+          for (const key of keys) {
+            delete data[key];
+          }
+          await storage.setItem(storageKey, data);
+        } catch (error) {
+          logger.warn(`Failed to clear ${label}`, { error });
+        }
+      });
     },
 
     async getAll(): Promise<Record<string, number>> {
@@ -171,25 +200,19 @@ export function createBoundedRecordStorage(config: BoundedRecordStorageConfig): 
       }
     },
 
-    async cleanup(): Promise<void> {
-      try {
-        const storage = createStorage();
-        const data = (await storage.getItem<Record<string, number>>(storageKey)) || {};
-        if (Object.keys(data).length > limit) {
-          await writeWithCap(data);
-        }
-      } catch (error) {
-        logger.warn(`Failed to cleanup ${label} entries`, { error });
-      }
+    cleanup(): Promise<void> {
+      return serializeWrite(cleanupInternal);
     },
 
-    async clearAll(): Promise<void> {
-      try {
-        const storage = createStorage();
-        await storage.removeItem(storageKey);
-      } catch (error) {
-        logger.warn(`Failed to clear all ${label} entries`, { error });
-      }
+    clearAll(): Promise<void> {
+      return serializeWrite(async () => {
+        try {
+          const storage = createStorage();
+          await storage.removeItem(storageKey);
+        } catch (error) {
+          logger.warn(`Failed to clear all ${label} entries`, { error });
+        }
+      });
     },
   };
 

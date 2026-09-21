@@ -263,6 +263,71 @@ describe('createBoundedRecordStorage', () => {
     }
   });
 
+  describe('concurrent writers', () => {
+    // Every write is a read-modify-write of one shared record, so two writes
+    // that are in flight together must not both start from the same snapshot.
+    it('keeps both keys when two set() calls for different keys race', async () => {
+      const store = makeStore({ storageKey: TEST_KEY, limit: 100, label: 'test' });
+
+      await Promise.all([store.set('a', 10), store.set('b', 20)]);
+
+      expect(await store.getAll()).toEqual({ a: 10, b: 20 });
+    });
+
+    it('keeps every key when many writers race', async () => {
+      const store = makeStore({ storageKey: TEST_KEY, limit: 100, label: 'test' });
+
+      await Promise.all(Array.from({ length: 20 }, (_, i) => store.set(`k${i}`, i + 1)));
+
+      expect(Object.keys(await store.getAll())).toHaveLength(20);
+    });
+
+    it('applies racing writes in call order, so the last set() for a key wins', async () => {
+      const store = makeStore({ storageKey: TEST_KEY, limit: 100, label: 'test' });
+
+      await Promise.all([store.set('a', 10), store.set('a', 60), store.set('a', 30)]);
+
+      expect(await store.get('a')).toBe(30);
+    });
+
+    it('does not let clear() and set() for different keys undo each other', async () => {
+      const store = makeStore({ storageKey: TEST_KEY, limit: 100, label: 'test' });
+      await store.set('old', 50);
+
+      await Promise.all([store.clear('old'), store.set('new', 70)]);
+
+      expect(await store.getAll()).toEqual({ new: 70 });
+    });
+
+    it('does not let concurrent clearMany() calls restore keys the other deleted', async () => {
+      const store = makeStore({ storageKey: TEST_KEY, limit: 100, label: 'test' });
+      await store.set('a', 1);
+      await store.set('b', 2);
+      await store.set('c', 3);
+
+      await Promise.all([store.clearMany(['a']), store.clearMany(['b'])]);
+
+      expect(await store.getAll()).toEqual({ c: 3 });
+    });
+
+    it('keeps writing after a queued operation fails', async () => {
+      const store = makeStore({ storageKey: TEST_KEY, limit: 100, label: 'test' });
+      const setItemSpy = jest.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => {
+        throw new Error('boom');
+      });
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+      try {
+        await Promise.all([store.set('fails', 10), store.set('ok', 20)]);
+      } finally {
+        setItemSpy.mockRestore();
+        warnSpy.mockRestore();
+      }
+
+      expect(await store.get('ok')).toBe(20);
+    });
+  });
+
   it('isolates state between two instances with different storage keys', async () => {
     const journeys = makeStore({ storageKey: 'pathfinder.journeys-test', limit: 100, label: 'j' });
     const interactives = makeStore({
