@@ -145,7 +145,7 @@ When the `changelog` skill is invoked from `release-prep`, override its Phase 3 
 
    Failure here is rare but blocking. Abort if it fails.
 
-3. **Skip plugin signing.** Per `docs/developer/RELEASE_PROCESS.md`, signing is currently disabled (would require `policy_token` in repo secrets). If signing is re-enabled later, this skill should be updated to run `npm run sign` here.
+3. **Skip plugin signing.** This skill does not sign. Only the tag-based `release.yml` workflow has its signing step commented out (it would need `policy_token` in repo secrets); shared CD (**Plugins - CD**) has its own signing path. Do not tell the user the release will be unsigned — see "Tag and GitHub release responsibilities" in `docs/developer/RELEASE_PROCESS.md`, which says to inspect the actual artifact.
 
 ### Phase 5 — Commit and hand off
 
@@ -180,15 +180,15 @@ When the `changelog` skill is invoked from `release-prep`, override its Phase 3 
    Previous: v<last-version>
    Included: <N> PRs (<X> added, <Y> fixed, <Z> chore)
 
-   To cut the release, run:
-
-     git tag -a v<version> -m "Release v<version>"
-     git push origin v<version>
-
-   The `release.yml` workflow triggers on `v*` tag push and creates the GitHub release.
+   Next: open and merge the release-prep PR, then promote it to Grafana
+   Cloud by dispatching the Plugins - CD workflow, following "Release
+   process steps" in docs/developer/RELEASE_PROCESS.md and the
+   deployment_tools release guide it links. Shared CD can create the
+   v<version> tag and a draft GitHub release itself; do not push a tag
+   first.
    ```
 
-   The release-prep commit must already be merged before tagging, so the tag points at an upstream-known SHA. Then push the tag. Confirm this order with the user if they're unfamiliar.
+   Do not present a manual tag push as the way to ship a Cloud release. A `v<version>` tag push only runs `release.yml`, which builds GitHub plugin artifacts; mention it only if the user says artifact publication is what they want, and then only after the release-prep commit is merged, so the tag points at an upstream-known SHA.
 
 ## Reuses
 
@@ -200,7 +200,8 @@ When the `changelog` skill is invoked from `release-prep`, override its Phase 3 
 ## Integration
 
 - Invoked manually by the maintainer before each release.
-- Pairs with `release.yml` GitHub workflow (which fires on `v*` tag push) — the skill ends where the workflow begins.
+- Hands off to Cloud promotion through the **Plugins - CD** workflow, described in `docs/developer/RELEASE_PROCESS.md`; the skill ends before that dispatch.
+- `release.yml` (fires on a `v*` tag push) only publishes GitHub plugin artifacts. It is not the Cloud deployment procedure.
 - Pairs with `/changelog` — release-prep calls it as a sub-step.
 
 ## Abort conditions
@@ -239,7 +240,8 @@ Total context per run: under 30k tokens for a typical release. Pull `npm run che
 ## What this skill does NOT do
 
 - Push commits or tags
-- Sign the plugin (disabled per RELEASE_PROCESS.md)
+- Sign the plugin (`release.yml` has signing commented out; shared CD signs through its own path, so check the artifact rather than assuming it is unsigned)
+- Dispatch **Plugins - CD** or promote to Cloud
 - Run E2E tests (`npm run e2e` is not part of `npm run check`; if needed, the user runs it separately)
 - Coordinate cross-repo releases (e.g., `grafana-recommender`) — out of scope
 - Edit `docs/sources/` user-facing docs — those follow a different update cadence
@@ -271,10 +273,10 @@ Reply with the version to proceed.
 
 Ready to release v2.11.0.
 
-To cut the release after the release-prep PR is merged, run:
-
-  git tag -a v2.11.0 -m "Release v2.11.0"
-  git push origin v2.11.0
-
-The `release.yml` workflow triggers on `v*` tag push and creates the GitHub release.
+Next: open and merge the release-prep PR, then promote it to Grafana
+Cloud by dispatching the Plugins - CD workflow, following "Release
+process steps" in docs/developer/RELEASE_PROCESS.md and the
+deployment_tools release guide it links. Shared CD can create the
+v2.11.0 tag and a draft GitHub release itself; do not push a tag
+first.
 ```
