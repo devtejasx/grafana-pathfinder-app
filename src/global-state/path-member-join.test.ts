@@ -9,6 +9,7 @@ import ossPathsData from '../learning-paths/paths.json';
 import cloudPathsData from '../learning-paths/paths-cloud.json';
 import { createBundledResolver } from '../package-engine/resolver';
 import { createCompositeResolver } from '../package-engine/composite-resolver';
+import { AppPlatformPackageResolver } from '../package-engine/app-platform-resolver';
 
 import { getContentKey, resetContentKeyForTests, setActiveTabUrl } from './content-key';
 import {
@@ -24,6 +25,21 @@ const EMPTY_CONTEXT: PathMemberJoinContext = {
   completedMemberIds: [],
   persistedPercentages: {},
 };
+
+jest.mock('../package-engine/app-platform-resolver', () => ({
+  ...jest.requireActual('../package-engine/app-platform-resolver'),
+  AppPlatformPackageResolver: class {
+    async resolve(packageId: string) {
+      return {
+        ok: true,
+        id: packageId,
+        contentUrl: `backend-guide:${packageId}`,
+        manifestUrl: `backend-guide:${packageId}`,
+        repository: 'app-platform',
+      };
+    }
+  },
+}));
 
 function contextWith(overrides: Partial<PathMemberJoinContext>): PathMemberJoinContext {
   return { ...EMPTY_CONTEXT, ...overrides };
@@ -182,13 +198,16 @@ describe('static path catalogues', () => {
 describe('scheme precedence', () => {
   // The join is tier 1 and cannot import package-engine at runtime, so its
   // bundled-before-backend-guide group order is a mirror. Cross-check it
-  // against what the composite resolver actually answers for a bundled id: an
-  // App Platform tier moved ahead of bundled would answer a colliding id under
+  // against what the composite resolver actually answers for a bundled id
+  // that the App Platform tier also answers (mocked above, the bundled tier
+  // stays real): moving that tier ahead of bundled answers the id under
   // `backend-guide:`, and this reddens instead of surfacing as a wrong member
   // percentage. The composite's own collision rule is pinned in
   // composite-resolver.test.ts.
   it('consults the scheme createCompositeResolver resolves a bundled id to, first', async () => {
     const packageId = 'first-dashboard';
+    expect((await new AppPlatformPackageResolver().resolve(packageId)).ok).toBe(true);
+
     const resolution = await createCompositeResolver({ acceptedTermsAndConditions: true }).resolve(packageId);
     if (!resolution.ok) {
       throw new Error(`expected ${packageId} to resolve through the composite resolver`);
