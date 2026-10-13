@@ -12,7 +12,7 @@
  * browser and why a pasted token is the primary path, not a fallback.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useSyncExternalStore } from 'react';
 
 import { canMintGrafanaToken, type GcxCredential } from './coda-api';
 import {
@@ -40,11 +40,12 @@ export interface UseGcxCredentialResult {
 }
 
 /**
- * @param onReady called once per credential installed into `sessionId`,
- *   whichever surface installed it. A gcx step uses it to mark itself complete;
- *   the terminal toolbar has nothing to do and omits it. Omit it on any surface
- *   that does not complete on a credential — one store serves them all, so a
- *   toolbar install reaches every subscriber.
+ * @param onReady called once per credential installed into `sessionId` by a
+ *   `run` from this same caller. A gcx step uses it to mark itself complete; the
+ *   terminal toolbar has nothing to do and omits it. An install another surface
+ *   made still shows up in `state` and `credential`, but does not call it: every
+ *   mounted step names the one live session, so completing on any install would
+ *   tick off a step whose own setup never ran.
  * @param sessionId the session this caller is asking about. Everything the hook
  *   reports describes that session and nothing else: a credential belongs to
  *   the VM it was written into, so an unrelated step must not read one, render
@@ -54,10 +55,13 @@ export function useGcxCredential(
   onReady?: (credential: GcxCredential) => void,
   sessionId: string | null = null
 ): UseGcxCredentialResult {
+  const requester = useId();
   const stored = useSyncExternalStore(subscribeGcxCredential, getGcxCredentialSnapshot);
   const snapshot = useMemo(
     () =>
-      stored.sessionId === sessionId ? stored : { sessionId, state: 'idle' as GcxState, credential: null, error: null },
+      stored.sessionId === sessionId
+        ? stored
+        : { sessionId, requester: null, state: 'idle' as GcxState, credential: null, error: null },
     [stored, sessionId]
   );
 
@@ -68,14 +72,22 @@ export function useGcxCredential(
 
   const notifiedRef = useRef<GcxCredential | null>(null);
   useEffect(() => {
-    if (snapshot.state !== 'ready' || !snapshot.credential || notifiedRef.current === snapshot.credential) {
+    if (
+      snapshot.state !== 'ready' ||
+      !snapshot.credential ||
+      snapshot.requester !== requester ||
+      notifiedRef.current === snapshot.credential
+    ) {
       return;
     }
     notifiedRef.current = snapshot.credential;
     onReadyRef.current?.(snapshot.credential);
-  }, [snapshot.state, snapshot.credential]);
+  }, [snapshot.state, snapshot.credential, snapshot.requester, requester]);
 
-  const run = useCallback((target: string | null, token?: string) => runGcxCredential(target, token), []);
+  const run = useCallback(
+    (target: string | null, token?: string) => runGcxCredential(target, token, requester),
+    [requester]
+  );
   const reset = useCallback(() => resetGcxCredential(), []);
 
   return {

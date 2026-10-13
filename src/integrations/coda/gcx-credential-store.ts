@@ -30,12 +30,14 @@ export type GcxState = 'idle' | 'provisioning' | 'ready' | 'needs-token' | 'fail
 export interface GcxSnapshot {
   /** The session the state describes, so a new VM cannot inherit it. */
   sessionId: string | null;
+  /** Who started the run, so only that caller completes on it. */
+  requester: string | null;
   state: GcxState;
   credential: GcxCredential | null;
   error: string | null;
 }
 
-const IDLE: GcxSnapshot = { sessionId: null, state: 'idle', credential: null, error: null };
+const IDLE: GcxSnapshot = { sessionId: null, requester: null, state: 'idle', credential: null, error: null };
 
 let snapshot: GcxSnapshot = IDLE;
 const listeners = new Set<() => void>();
@@ -125,9 +127,13 @@ async function mintOptions(sessionId: string): Promise<MintTokenOptions> {
 /**
  * Install a credential into `sessionId`, minting one unless `token` is given.
  * The session's terminal must already be connected; the backend has no other
- * route to the VM.
+ * route to the VM. `requester` rides on every snapshot the run publishes.
  */
-export async function runGcxCredential(sessionId: string | null, token?: string): Promise<void> {
+export async function runGcxCredential(
+  sessionId: string | null,
+  token?: string,
+  requester: string | null = null
+): Promise<void> {
   if (!sessionId) {
     publish({ ...IDLE, state: 'failed', error: 'The sandbox is not connected, so gcx cannot be set up yet.' });
     return;
@@ -138,7 +144,7 @@ export async function runGcxCredential(sessionId: string | null, token?: string)
 
   generation += 1;
   const run = generation;
-  publish({ sessionId, state: 'provisioning', credential: null, error: null });
+  publish({ sessionId, requester, state: 'provisioning', credential: null, error: null });
 
   /**
    * Publish only while this run is still the one the UI is waiting for. A
@@ -146,12 +152,12 @@ export async function runGcxCredential(sessionId: string | null, token?: string)
    * was already in flight would otherwise report ready for a VM that never
    * received a credential.
    */
-  const settle = (next: GcxSnapshot): boolean => {
+  const settle = (next: Omit<GcxSnapshot, 'requester'>): boolean => {
     if (run !== generation || snapshot.sessionId !== sessionId) {
       logger.warn('[gcx] discarding a settled install for a session that has moved on');
       return false;
     }
-    publish(next);
+    publish({ ...next, requester });
     return true;
   };
 

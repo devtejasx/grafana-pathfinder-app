@@ -168,10 +168,9 @@ export const TerminalConnectStep = forwardRef<
       mintLikely,
       isPending: gcxCredentialPending,
       run: runGcxCredential,
-      // One store serves every surface that offers the install, so a credential
-      // installed from the terminal toolbar reaches every mounted step. Only a
-      // gcx step on this session has anything to complete on it, and the `gcx`
-      // guards below keep the rest of a non-gcx step's render out of it too.
+      // Both install paths below go through this `run`, which is what ties a
+      // credential to this step. One installed by another step or the toolbar
+      // shows as ready here and leaves Continue to the learner.
     } = useGcxCredential(gcx ? markComplete : undefined, terminalCtx?.sessionId);
 
     const handleConnect = useCallback(async () => {

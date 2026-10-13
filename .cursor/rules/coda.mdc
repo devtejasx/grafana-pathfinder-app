@@ -133,7 +133,9 @@ step semantics do not belong in it.
 **The credential state is module-scoped and keyed to the session.** `gcx-credential-store.ts`, not
 component state: the guide step and the toolbar offer the same install, and Grafana rejects a second
 `coda-<sessionId>` token on the name, so two independent copies would let one surface mint over the
-other. `onReady` fires for whichever surface installed it. `TerminalProvider` calls
+other. `onReady` fires only for the caller whose `run` started the install: every mounted step names the
+same live session, so an install from another step or the toolbar reads as ready without completing
+anything. `TerminalProvider` calls
 `invalidateGcxCredentialForSession` when the registered session id changes, because a reconnect
 provisions a fresh VM that holds no credential — reporting the old one would name a box that is gone. A
 `null` id is only a disconnect and does not discard it.
