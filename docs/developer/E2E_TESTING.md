@@ -24,6 +24,8 @@ This is the canonical implementation-backed reference for E2E CLI behavior. Veri
 - `src/cli/e2e/cloud-provisioning.ts` and `src/cli/e2e/cloud-stack-pool-manager.ts` — shared-stack service-account isolation and pool-manager isolated stack leasing.
 - `tests/e2e-runner/guide-runner.spec.ts` — isolated, single-guide wrapper for the reusable guide lifecycle.
 - `tests/e2e-runner/shared-guide-runner.spec.ts` — one-test shared browser session for explicit path and journey selections.
+- `tests/e2e-runner/fixtures.ts` — the runner-only Playwright fixture. It extends the shared `tests/fixtures.ts` fixture and installs `disableRudderstack` as an init script on every browser context, so guide runs send no analytics. It is a single file, unrelated to the `tests/e2e-runner/fixtures/` directory next to it, which holds test packages.
+- `tests/e2e-runner/utils/disable-rudderstack.ts` — the init script. It intercepts `window.grafanaBootData` and blanks the RudderStack write key and data plane URL before Grafana initializes analytics.
 - `tests/e2e-runner/utils/guide-runner/discovery.ts` — current and legacy DOM discovery, driver-based inspection, and supported/unsupported coverage collection.
 - `tests/e2e-runner/utils/guide-runner/drivers/types.ts` — the `StepDriver` contract for inspection, timeout calculation, completion checks, skipping, and execution.
 - `tests/e2e-runner/utils/guide-runner/drivers/registry.ts` — the exhaustive registry of tracked step kinds, their supported status, and their concrete drivers.
@@ -33,6 +35,8 @@ This is the canonical implementation-backed reference for E2E CLI behavior. Veri
 - `tests/e2e-runner/utils/console-reporter.ts`, `src/cli/e2e/e2e-reporter.ts`, `src/cli/e2e/e2e-results.ts`, and `src/cli/e2e/schemas/e2e-report.schema.ts` — console output, external report construction, CLI outcome mapping, and the report contract.
 - `tests/e2e-runner/utils/guide-runner/milestone-replacement.ts` — runner-only progress reset and legacy E2E tab replacement.
 - `docs/developer/E2E_TESTING_CONTRACT.md` — stable `data-test-*` selector contract used by the runner.
+
+CLI guide runner specs, such as `guide-runner.spec.ts` and `shared-guide-runner.spec.ts`, must import `test` from `./fixtures`, not from `../fixtures` or `@playwright/test`. Either of those would skip the RudderStack suppression, and the run would send analytics. Normal Playwright tests outside `tests/e2e-runner/` keep using `tests/fixtures.ts`.
 
 ## Quick start
 
