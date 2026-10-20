@@ -215,6 +215,7 @@ export function createUserStorageMock() {
      *  synchronously when it derives a guide's percentage. */
     guideCompletionMarkStorage: {
       isMarked: jest.fn((contentKey: string) => memoryStore.get(markKey(contentKey)) === true),
+      getChoiceCompletionKeys: jest.fn((): string[] => []),
       get: jest.fn(async (contentKey: string) => (memoryStore.get(markKey(contentKey)) === true ? true : null)),
       set: jest.fn(async (contentKey: string, value: true) => {
         memoryStore.set(markKey(contentKey), value);

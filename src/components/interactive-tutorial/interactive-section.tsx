@@ -1585,6 +1585,7 @@ export function InteractiveSection({
             </div>
           )}
 
+          {/* Stay mounted while collapsed: nested visibility gates must keep reporting for guide progress. */}
           <ol className="interactive-section-content" hidden={isCollapsed}>
             {wrapSectionChildrenForNumbering(enhancedChildren)}
           </ol>

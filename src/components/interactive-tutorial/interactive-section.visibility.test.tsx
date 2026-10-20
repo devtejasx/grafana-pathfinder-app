@@ -48,10 +48,21 @@ jest.mock('./interactive-conditional', () =>
 
 import { InteractiveSection, resetInteractiveCounters } from './interactive-section';
 import {
+  memoryStore,
   resetSectionHarness,
   setCheckRequirementsResult,
   silenceSectionWarnings,
 } from '../../test-utils/interactive-section-harness';
+import {
+  evictAllGuideIndexes,
+  isGuideChoiceProgressReady,
+  publishGuideIndex,
+  setGuideChoiceResponses,
+} from '../../global-state/active-guide-index';
+import { computeGuideBlockIndex } from '../../lib/guide-stats';
+import { createChoiceProgressModel } from '../../lib/guide-stats/choice-progress';
+import type { JsonBlock } from '../../types/json-guide.types';
+import { getContentKey } from './get-content-key';
 
 let warnings: jest.SpyInstance;
 beforeAll(() => {
@@ -136,4 +147,65 @@ it('returns focus to a choice when externally changed responses hide focused con
   mockResponses = {};
   view.rerender(content());
   expect(screen.getByRole('checkbox', { name: 'Logs choice' })).toHaveFocus();
+});
+
+describe.each(['heading-only', 'hide'] as const)('a %s gate nested in a collapsed section', (mode) => {
+  const guideBlocks: JsonBlock[] = [
+    {
+      type: 'section',
+      id: 'parent',
+      blocks: [
+        {
+          type: 'section',
+          id: 'child',
+          requirements: ['has-datasource:prometheus'],
+          whenRequirementsUnmet: mode,
+          blocks: [{ type: 'markdown', id: 'child-step', content: 'Child body' }],
+        },
+      ],
+    },
+  ];
+
+  function Guide() {
+    return (
+      <InteractiveSection id="parent" title="Parent">
+        <InteractiveSection
+          id="child"
+          title="Child"
+          requirements={['has-datasource:prometheus']}
+          whenRequirementsUnmet={mode}
+        >
+          <p>Child body</p>
+        </InteractiveSection>
+      </InteractiveSection>
+    );
+  }
+
+  beforeEach(() => {
+    const contentKey = getContentKey();
+    const index = computeGuideBlockIndex(guideBlocks);
+    publishGuideIndex({
+      contentKey,
+      index,
+      denominatorSource: 'live-pre-inlining',
+      choiceModel: createChoiceProgressModel(guideBlocks, index),
+    });
+    setGuideChoiceResponses(contentKey, {});
+  });
+  afterEach(() => evictAllGuideIndexes());
+
+  it('keeps reporting after the completed parent auto-collapses', async () => {
+    render(<Guide />);
+    await waitFor(() => expect(isGuideChoiceProgressReady(getContentKey())).toBe(true));
+    fireEvent.click(screen.getByTestId('interactive-mark-section-complete-section-parent'));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Expand section' })).toBeInTheDocument());
+    await waitFor(() => expect(isGuideChoiceProgressReady(getContentKey())).toBe(true));
+  });
+
+  it('reports on a reload with the parent already collapsed', async () => {
+    memoryStore.set(`section-collapse::${getContentKey()}::section-parent`, true);
+    render(<Guide />);
+    await waitFor(() => expect(screen.getByTestId('interactive-section-section-parent')).toHaveClass('collapsed'));
+    await waitFor(() => expect(isGuideChoiceProgressReady(getContentKey())).toBe(true));
+  });
 });
