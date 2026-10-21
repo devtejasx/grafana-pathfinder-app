@@ -30,7 +30,7 @@ jest.mock('../../lib/analytics', () => ({
 }));
 
 const markStorage = { get: jest.fn(), set: jest.fn(), clear: jest.fn(), getChoiceCompletionKeys: jest.fn(() => []) };
-const setCompletionPercentage = jest.fn();
+const setCompletionPercentage = jest.fn((..._a: unknown[]): Promise<void> => Promise.resolve());
 jest.mock('../../lib/user-storage', () => ({
   guideCompletionMarkStorage: {
     get: (...a: unknown[]) => markStorage.get(...a),
@@ -297,12 +297,49 @@ describe('MarkCompleteFooter', () => {
     await clickWhenReady();
 
     expect(setCompletionPercentage).toHaveBeenCalledWith('guide-key', 100);
-    expect(dispatchProgress).toHaveBeenCalledWith({
-      kind: 'guide',
-      contentKey: 'guide-key',
-      percentage: 100,
-      hasProgress: true,
+    await waitFor(() =>
+      expect(dispatchProgress).toHaveBeenCalledWith({
+        kind: 'guide',
+        contentKey: 'guide-key',
+        percentage: 100,
+        hasProgress: true,
+      })
+    );
+  });
+
+  it('announces 100% only after the percentage write has landed', async () => {
+    let resolveWrite: () => void = () => {};
+    setCompletionPercentage.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveWrite = resolve;
+        })
+    );
+    render(<MarkCompleteFooter context="guide" onMarkComplete={jest.fn()} />);
+
+    await clickWhenReady();
+    await act(async () => {});
+    expect(dispatchProgress).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveWrite();
     });
+    expect(dispatchProgress).toHaveBeenCalledWith(
+      expect.objectContaining({ contentKey: 'guide-key', percentage: 100 })
+    );
+  });
+
+  it('still announces 100% when the percentage write fails', async () => {
+    setCompletionPercentage.mockImplementationOnce(() => Promise.reject(new Error('quota')));
+    render(<MarkCompleteFooter context="guide" onMarkComplete={jest.fn()} />);
+
+    await clickWhenReady();
+
+    await waitFor(() =>
+      expect(dispatchProgress).toHaveBeenCalledWith(
+        expect.objectContaining({ contentKey: 'guide-key', percentage: 100 })
+      )
+    );
   });
 
   it('announces reaching complete exactly once, and keeps focus rather than dropping it to the body', async () => {

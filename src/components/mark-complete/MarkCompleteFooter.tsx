@@ -281,8 +281,15 @@ export function MarkCompleteFooter({
       // recommendation cards and context read, and the reader's statement that
       // they finished belongs there too. See COMPLETION-MODEL.md, "Rolling this
       // back".
-      void interactiveCompletionStorage.set(contentKey, 100);
-      dispatchProgress({ kind: 'guide', contentKey, percentage: 100, hasProgress: true });
+      // Announce after the write settles, or a listener reading storage sees the old value.
+      void interactiveCompletionStorage
+        .set(contentKey, 100)
+        .catch((error) => {
+          logger.warn('Failed to persist guide completion percentage', { error });
+        })
+        .then(() => {
+          dispatchProgress({ kind: 'guide', contentKey, percentage: 100, hasProgress: true });
+        });
     }
 
     // Reduced motion means no dwell either — continuing is the reader's
